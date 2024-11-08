@@ -1,12 +1,17 @@
 ﻿// Chip_8_Simulator.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
 //
-
 #include <iostream>
 #include <array>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
 #include <iomanip>
+#include <chrono>
+#include <thread>
+
+const int SCREEN_WIDTH = 64;
+const int SCREEN_HEIGHT = 32;
+const int PIXEL_SIZE = 10; // 每个像素的大小，以放大显示
 
 //虚拟机内存类
 class Memory
@@ -23,11 +28,18 @@ public:
 			memory[address + i] = data[0 + i];
 		}
 	}
-	std::pair<uint8_t, uint8_t> get(std::size_t address) {
+	std::pair<uint8_t, uint8_t> get_pair(std::size_t address) {
+		// 通常用来读取指令
 		if (address >= MEMORY_SIZE) {
 			throw std::out_of_range("Read operation out of memory bounds");
 		}
 		return{ memory[address], memory[address + 1] };
+	}
+	uint8_t get_byte(std::size_t address) {
+		if (address >= MEMORY_SIZE) {
+			throw std::out_of_range("Read operation out of memory bounds");
+		}
+		return memory[address];
 	}
 	void set(std::uint16_t address, std::pair<uint8_t, uint8_t> data) {
 		if (address >= MEMORY_SIZE) {
@@ -55,10 +67,18 @@ public:
 		sound_timer = 0;
 		memory = Memory();
 	};
+	void print_screen() {
+		for (int i = 0; i < 64 * 32; i++) {
+			std::cout << static_cast<int>(memory.get_byte(DISPLAY_ADDRESS + i));
+			if (i % 64 == 0) {
+				std::cout << std::endl;
+			}
+		}
+	}
 	void load_rom(const uint8_t* data, std::size_t length) {
 		memory.load_rom(data, length);
 		std::cout << "File loaded into memory successfully." << std::endl;
-		std::cout <<"First 2 byte is: " << std::hex << static_cast<int>(memory.get(Memory::ROM_START_ADDRESS).first)<<" " << std::hex << static_cast<int>(memory.get(Memory::ROM_START_ADDRESS).second) << std::endl;
+		std::cout << "First 2 byte is: " << std::hex << static_cast<int>(memory.get_byte(Memory::ROM_START_ADDRESS)) << " " << std::hex << static_cast<int>(memory.get_pair(Memory::ROM_START_ADDRESS).second) << std::endl;
 	}
 	void save_registers() {
 		uint16_t address = STACK_ADDRESS + SP * STACK_SIZE;
@@ -75,26 +95,20 @@ public:
 		uint16_t first_high = opcode_value & 0xF000;
 		//Execute machine language subroutine at address NNN
 		if (first_high == 0x0000) {
-			uint16_t address = opcode_value & 0x0FFF;
-			if (address >= 0x200) {
-				SP++;
-				save_registers();
-				PC = address;
-				return;
-			}
-			else if (address == 0x00EE) {
+			uint16_t low_byte = opcode_value & 0x0FFF;
+			if (low_byte == 0x00EE) {
 				uint16_t address = STACK_ADDRESS + SP * STACK_SIZE;
-				PC = (memory.get(address).first << 8) | memory.get(address).second;
-				I = (memory.get(address + 2).first << 8) | memory.get(address + 2).second;
+				PC = (memory.get_pair(address).first << 8) | memory.get_pair(address).second;
+				I = (memory.get_pair(address + 2).first << 8) | memory.get_pair(address + 2).second;
 				for (int i = 0; i < 16; i++) {
-					V[i] = memory.get(address + 4 + i).first;
+					V[i] = memory.get_byte(address + 4 + i);
 				}
-				delay_timer = memory.get(address + 20).first;
-				sound_timer = memory.get(address + 21).first;
+				delay_timer = memory.get_byte(address + 20);
+				sound_timer = memory.get_byte(address + 21);
 				SP--;
 				return;
 			}
-			else if (address == 0x00E0) {
+			else if (low_byte == 0x00E0) {
 				//Clear the screen
 				for (int i = 0; i < 64 * 32; i++) {
 					memory.set(DISPLAY_ADDRESS + i, { 0, 0 });
@@ -124,8 +138,10 @@ public:
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t kk = opcode_value & 0x00FF;
 			if (V[x] == kk) {
-				PC += 2;
+				PC += 4;
+				return;
 			}
+			PC += 2;
 			return;
 		}
 		else if (first_high == 0x4000) {
@@ -133,8 +149,10 @@ public:
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t kk = opcode_value & 0x00FF;
 			if (V[x] != kk) {
-				PC += 2;
+				PC += 4;
+				return;
 			}
+			PC += 2;
 			return;
 		}
 		else if (first_high == 0x5000) {
@@ -142,8 +160,10 @@ public:
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t y = (opcode_value & 0x00F0) >> 4;
 			if (V[x] == V[y]) {
-				PC += 2;
+				PC += 4;
+				return;
 			}
+			PC += 2;
 			return;
 		}
 		else if (first_high == 0x6000) {
@@ -151,6 +171,7 @@ public:
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t kk = opcode_value & 0x00FF;
 			V[x] = kk;
+			PC += 2;
 			return;
 		}
 		else if (first_high == 0x7000) {
@@ -158,14 +179,210 @@ public:
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t kk = opcode_value & 0x00FF;
 			V[x] += kk;
+			PC += 2;
 			return;
 		}
+		else if (first_high == 0x8000) {
+			uint8_t x = (opcode_value & 0x0F00) >> 8;
+			uint8_t y = (opcode_value & 0x00F0) >> 4;
+			uint8_t last_nibble = opcode_value & 0x000F;
+			if (last_nibble == 0x0) {
+				//Set Vx = Vy
+				V[x] = V[y];
+			}
+			else if (last_nibble == 0x1) {
+				//Set Vx = Vx OR Vy
+				V[x] |= V[y];
+			}
+			else if (last_nibble == 0x2) {
+				//Set Vx = Vx AND Vy
+				V[x] &= V[y];
+			}
+			else if (last_nibble == 0x3) {
+				//Set Vx = Vx XOR Vy
+				V[x] ^= V[y];
+			}
+			else if (last_nibble == 0x4) {
+				//Set Vx = Vx + Vy, set VF = carry
+				uint16_t sum = V[x] + V[y];
+				V[0xF] = sum > 0xFF ? 1 : 0;
+				V[x] = sum & 0xFF;
+			}
+			else if (last_nibble == 0x5) {
+				//Set Vx = Vx - Vy, set VF = NOT borrow
+				V[0xF] = V[x] > V[y] ? 1 : 0;
+				V[x] -= V[y];
+			}
+			else if (last_nibble == 0x6) {
+				//Set Vx >>= Vy
+				V[0xF] = V[x] & 0x1;
+				V[x] >>= V[y];
+			}
+			else if (last_nibble == 0x7) {
+				//Set Vx = Vy - Vx, set VF = NOT borrow
+				V[0xF] = V[y] > V[x] ? 1 : 0;
+				V[x] = V[y] - V[x];
+			}
+			else if (last_nibble == 0xE) {
+				//Set Vx <<= Vy
+				V[0xF] = V[x] & 0b10000000;
+				V[x] >>= V[y];
+			}
+			else {
+				throw std::runtime_error("Invalid opcode");
+			}
+			PC += 2;
+		}
+		else if (first_high == 0x9000) {
+			//Skip next instruction if Vx != Vy
+			uint8_t x = (opcode_value & 0x0F00) >> 8;
+			uint8_t y = (opcode_value & 0x00F0) >> 4;
+			if (V[x] != V[y]) {
+				PC += 4;
+			}
+			else {
+				PC += 2;
+			}
+		}
+		else if (first_high == 0xA000) {
+			//Set I = nnn
+			I = opcode_value & 0x0FFF;
+			PC += 2;
+		}
+		else if (first_high == 0xB000) {
+			//Jump to location nnn + V0
+			PC = (opcode_value & 0x0FFF) + V[0];
+		}
+		else if (first_high == 0xC000) {
+			//Set Vx = random byte AND kk
+			uint8_t x = (opcode_value & 0x0F00) >> 8;
+			uint8_t kk = opcode_value & 0x00FF;
+			V[x] = (rand() % 256) & kk;
+			PC += 2;
+		}
+		else if (first_high == 0xD000) {
+			// Display/draw sprite
+			uint8_t x = V[(opcode_value & 0x0F00) >> 8];
+			uint8_t y = V[(opcode_value & 0x00F0) >> 4];
+			uint8_t height = opcode_value & 0x000F;
+			uint8_t sprite_byte;
 
+			V[0xF] = 0;
+			for (int yline = 0; yline < height; yline++) {
+				sprite_byte = memory.get_byte(I + yline);
+				for (int xline = 0; xline < 8; xline++) {
+					uint8_t pixel = sprite_byte & (0x80 >> xline);
+					if (pixel != 0) {
+						uint16_t display_addr = DISPLAY_ADDRESS + x + ((y + yline) * 8);
+						//display_addr = display_addr - (display_addr % 8);
+						uint8_t pixel_in_mem = memory.get_byte(display_addr);
+						if (pixel_in_mem == 1 && pixel == 1) {
+							V[0xF] = 1;
+						}
+						uint8_t tail_byte = memory.get_pair(display_addr).second;
+						memory.set(display_addr, { pixel_in_mem ^ pixel, tail_byte });
+					}
+				}
+			}
+			PC += 2;
+		}
+		else if (first_high == 0xE000) {
+			uint8_t x = (opcode_value & 0x0F00) >> 8;
+			uint8_t last_byte = opcode_value & 0x00FF;
+			if (last_byte == 0x9E) {
+				//Skip next instruction if key with the value of Vx is pressed
+				PC += 4;
+			}
+			else if (last_byte == 0xA1) {
+				//Skip next instruction if key with the value of Vx is not pressed
+				PC += 4;
+			}
+			else {
+				throw std::runtime_error("Invalid opcode");
+			}
+			PC += 2;
+		}
+		else if (first_high == 0xF000) {
+			uint8_t x = (opcode_value & 0x0F00) >> 8;
+			uint8_t last_byte = opcode_value & 0x00FF;
+			if (last_byte == 0x07) {
+				//Set Vx = delay timer value
+				V[x] = delay_timer;
+			}
+			else if (last_byte == 0x0A) {
+				//Wait for a key press, store the value of the key in Vx
+			}
+			else if (last_byte == 0x15) {
+				//Set delay timer = Vx
+				delay_timer = V[x];
+			}
+			else if (last_byte == 0x18) {
+				//Set sound timer = Vx
+				sound_timer = V[x];
+			}
+			else if (last_byte == 0x1E) {
+				//Set I = I + Vx
+				I += V[x];
+			}
+			else if (last_byte == 0x29) {
+				//Set I = location of sprite for digit Vx
+				I = V[x] * 5;
+			}
+			else if (last_byte == 0x33) {
+				//Store BCD representation of Vx in memory locations I, I+1, and I+2
+				uint8_t hundreds = V[x] / 100;
+				uint8_t tens = (V[x] / 10) % 10;
+				uint8_t ones = V[x] % 10;
+				memory.set(I, { hundreds, 0 });
+				memory.set(I + 1, { tens, 0 });
+				memory.set(I + 2, { ones, 0 });
+			}
+			else if (last_byte == 0x55) {
+				//Store registers V0 through Vx in memory starting at location I
+				for (int i = 0; i <= x; i++) {
+					memory.set(I + i, { V[i], 0 });
+				}
+			}
+			else if (last_byte == 0x65) {
+				//Read registers V0 through Vx from memory starting at location I
+				for (int i = 0; i <= x; i++) {
+					V[i] = memory.get_byte(I + i);
+				}
+			}
+			else {
+				throw std::runtime_error("Invalid opcode");
+
+			}
+			PC += 2;
+		}
 	}
-	void run() {
+	void print_memory_pixels() {
+		const std::size_t start_address = 3840;
+		const std::size_t length = 256;
+		const std::size_t pixels_per_byte = 8;
+		const std::size_t bytes_per_line = 8;
+
+		for (std::size_t i = 0; i < length; i++) {
+			auto byte = memory.get_byte(start_address + i);
+			for (std::size_t bit = 0; bit < pixels_per_byte; bit++) {
+				std::cout << ((byte & (0x80 >> bit)) ? "█" : " ");
+			}
+			if ((i + 1) % bytes_per_line == 0) {
+				std::cout << std::endl;
+			}
+		}
+	}
+	int run() {
 		while (true) {
-			auto opcode = memory.get(PC);
+			auto opcode = memory.get_pair(PC);
+			int count = 0;
 			execute(opcode);
+			if (count % 10 == 0) {
+				std::cout << "=====================================" << std::endl;
+				print_memory_pixels();
+				std::this_thread::sleep_for(std::chrono::milliseconds(200));
+			}
+			count++;
 		}
 	}
 private:
@@ -177,7 +394,7 @@ private:
 	uint8_t sound_timer;
 	uint16_t DISPLAY_ADDRESS = 0xF00;//显存从这里开始，共64*32个像素
 	uint16_t STACK_ADDRESS = 0xEA0;//栈从这里开始，共16个栈
-	uint16_t STACK_SIZE = 16+2+2+1+1; //栈的大小，只保存除SP的全部数据寄存器的内容。
+	uint16_t STACK_SIZE = 16 + 2 + 2 + 1 + 1; //栈的大小，只保存除SP的全部数据寄存器的内容。
 	Memory memory; // Memory
 };
 
@@ -196,6 +413,7 @@ int test_Chip8Simulator() {
 	uint8_t buffer[Memory::MEMORY_SIZE];
 	file.read(reinterpret_cast<char*>(buffer), filesize);
 	chip8.load_rom(buffer, filesize);
+	chip8.run();
 	return 0;
 }
 
@@ -231,7 +449,7 @@ int main()
 	try
 	{
 		for (int i = 0; i < Memory::MEMORY_SIZE; i = i + 2) {
-			auto data_read = mem.get(i);
+			auto data_read = mem.get_pair(i);
 			std::cout << "Address: " << std::setw(3) << std::setfill('0') << std::hex << i << " "
 				<< std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(data_read.first) << " "
 				<< std::setw(2) << std::setfill('0') << static_cast<int>(data_read.second) << std::dec << std::endl;
