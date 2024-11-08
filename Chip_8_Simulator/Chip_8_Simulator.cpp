@@ -278,10 +278,11 @@ public:
 					uint8_t pixel = sprite_byte & (0x80 >> xline);
 					uint16_t pixel_byte_addr = DISPLAY_ADDRESS + (x + xline) / 8 + ((y + yline) * 8);
 					if (pixel != 0) {
-						if (pixel & (memory.get_byte(pixel_byte_addr) & (0x80 >> (7-((x + xline) % 8))))) {
+						if (pixel & (memory.get_byte(pixel_byte_addr) & (0x80 >> (x + xline) % 8))) {
 							V[0xF] = 1;
 						}
-						memory.set_byte(pixel_byte_addr, memory.get_byte(pixel_byte_addr) ^ ((sprite_byte & 0x80)>>((x + xline) % 8)));
+						pixel = pixel << xline;
+						memory.set_byte(pixel_byte_addr, memory.get_byte(pixel_byte_addr) ^ (pixel >> ((x + xline) % 8)));
 					}
 				}
 			}
