@@ -1,5 +1,7 @@
 ﻿// Chip_8_Simulator.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
 //
+#define SDL_MAIN_HANDLED
+#include "SDL.h"
 #include <iostream>
 #include <array>
 #include <iostream>
@@ -8,10 +10,6 @@
 #include <iomanip>
 #include <chrono>
 #include <thread>
-
-const int SCREEN_WIDTH = 64;
-const int SCREEN_HEIGHT = 32;
-const int PIXEL_SIZE = 10; // 每个像素的大小，以放大显示
 
 //虚拟机内存类
 class Memory
@@ -47,6 +45,12 @@ public:
 		}
 		memory[address] = data.first;
 		memory[address + 1] = data.second;
+	}
+	void set_byte(std::uint16_t address, uint8_t data) {
+		if (address >= MEMORY_SIZE) {
+			throw std::out_of_range("Write operation out of memory bounds");
+		}
+		memory[address] = data;
 	}
 private:
 	std::array<uint8_t, MEMORY_SIZE> memory = { 0 };
@@ -272,15 +276,12 @@ public:
 				sprite_byte = memory.get_byte(I + yline);
 				for (int xline = 0; xline < 8; xline++) {
 					uint8_t pixel = sprite_byte & (0x80 >> xline);
+					uint16_t pixel_byte_addr = DISPLAY_ADDRESS + (x + xline) / 8 + ((y + yline) * 8);
 					if (pixel != 0) {
-						uint16_t display_addr = DISPLAY_ADDRESS + x + ((y + yline) * 8);
-						//display_addr = display_addr - (display_addr % 8);
-						uint8_t pixel_in_mem = memory.get_byte(display_addr);
-						if (pixel_in_mem == 1 && pixel == 1) {
+						if (pixel & (memory.get_byte(pixel_byte_addr) & (0x80 >> xline))) {
 							V[0xF] = 1;
 						}
-						uint8_t tail_byte = memory.get_pair(display_addr).second;
-						memory.set(display_addr, { pixel_in_mem ^ pixel, tail_byte });
+						memory.set_byte(pixel_byte_addr, memory.get_byte(pixel_byte_addr) ^ (pixel << (x + xline) % 8));
 					}
 				}
 			}
@@ -375,15 +376,29 @@ public:
 	int run() {
 		while (true) {
 			auto opcode = memory.get_pair(PC);
-			int count = 0;
 			execute(opcode);
-			if (count % 10 == 0) {
-				std::cout << "=====================================" << std::endl;
-				print_memory_pixels();
-				std::this_thread::sleep_for(std::chrono::milliseconds(200));
-			}
-			count++;
 		}
+	}
+	Memory& step() {
+		auto opcode = memory.get_pair(PC);
+		std::cout.width(3); std::cout.fill('0');
+		std::cout << "PC: " << std::hex << PC;
+		std::cout << " opcode: " << std::setw(2) << std::setfill('0') << std::hex << std::hex << static_cast<int>(opcode.first);
+		std::cout << " " << std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(opcode.second) << std::endl;
+		execute(opcode);
+		return memory;
+	}
+	void print_status() const {
+		std::cout << "I: " <<std::setw(3)<<std::setfill('0') << std::hex << I << " ";
+		std::cout << "SP: " << std::setw(3) << std::setfill('0') << std::hex << SP << " ";
+		//std::cout << "PC: " << std::hex << PC << " ";
+		//std::cout << "Delay Timer: " << std::hex << static_cast<int>(delay_timer) << " ";
+		//std::cout << "Sound Timer: " << std::hex << static_cast<int>(sound_timer) << " ";
+		for (size_t i = 0; i < 16; i++)
+		{
+			std::cout << "V["<<std::hex<<i<<"]: "<< std::hex << static_cast<int>(V[i]) << ", ";
+		}
+		std::cout << std::endl << std::endl;
 	}
 private:
 	uint8_t V[16]; // 16 8-bit data registers
@@ -417,11 +432,58 @@ int test_Chip8Simulator() {
 	return 0;
 }
 
-int main()
-{
-	//	初始化虚拟机内存空间
-	Memory mem;
+const int SCREEN_WIDTH = 64;
+const int SCREEN_HEIGHT = 32;
+const int PIXEL_SIZE = 10;
 
+void render_screen(SDL_Renderer* renderer, Memory& memory) {
+	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // 黑色背景
+	SDL_RenderClear(renderer); // 清除屏幕
+
+	SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // 白色像素
+
+	// 遍历显存（64x32 = 2048位，等于256字节）
+	for (int y = 0; y < SCREEN_HEIGHT; ++y) {
+		for (int x_byte = 0; x_byte < SCREEN_WIDTH / 8; ++x_byte) {
+			uint8_t byte = memory.get_byte(0xF00 + y * (SCREEN_WIDTH / 8) + x_byte);
+
+			for (int bit = 0; bit < 8; ++bit) {
+				if (byte & (0x80 >> bit)) { // 检查当前位是否为1
+					int x = (x_byte * 8 + bit) * PIXEL_SIZE;
+					int y_pos = y * PIXEL_SIZE;
+					SDL_Rect rect = { x, y_pos, PIXEL_SIZE, PIXEL_SIZE };
+					SDL_RenderFillRect(renderer, &rect); // 绘制像素
+				}
+			}
+		}
+	}
+	SDL_RenderPresent(renderer); // 更新显示
+}
+
+int main(int argc, char* args[])
+{
+	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+		std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
+		return 1;
+	}
+
+	SDL_Window* window = SDL_CreateWindow("CHIP-8 Emulator", 100, 100, 640, 320, SDL_WINDOW_SHOWN);
+	if (!window) {
+		std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
+		SDL_Quit();
+		return 1;
+	}
+
+	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	if (!renderer) {
+		SDL_DestroyWindow(window);
+		std::cerr << "SDL_CreateRenderer Error: " << SDL_GetError() << std::endl;
+		SDL_Quit();
+		return 1;
+	}
+
+
+	Chip8Simulator chip8;
 	//	读取ROM
 	const std::string filename = "test_opcode.ch8";
 	std::ifstream file(filename, std::ios::binary);
@@ -432,37 +494,29 @@ int main()
 	file.seekg(0, std::ios::end);
 	std::size_t filesize = file.tellg();
 	file.seekg(0, std::ios::beg);
-
 	uint8_t buffer[Memory::MEMORY_SIZE];
 	file.read(reinterpret_cast<char*>(buffer), filesize);
+	chip8.load_rom(buffer, filesize);
 
-	try {
-		mem.load_rom(buffer, filesize);
-	}
-	catch (const std::exception& e) {
-		std::cerr << "Exception: " << e.what() << std::endl;
-		return 1;
-	}
 
-	std::cout << "File loaded into memory successfully." << std::endl;
-	//	读取示例
-	try
-	{
-		for (int i = 0; i < Memory::MEMORY_SIZE; i = i + 2) {
-			auto data_read = mem.get_pair(i);
-			std::cout << "Address: " << std::setw(3) << std::setfill('0') << std::hex << i << " "
-				<< std::setw(2) << std::setfill('0') << std::hex << static_cast<int>(data_read.first) << " "
-				<< std::setw(2) << std::setfill('0') << static_cast<int>(data_read.second) << std::dec << std::endl;
+	bool running = true;
+	SDL_Event e;
+	while (running) {
+		while (SDL_PollEvent(&e)) {
+			if (e.type == SDL_QUIT) {
+				running = false;
+			}
 		}
+		render_screen(renderer, chip8.step());
+		SDL_Delay(100); // 模拟帧率
+		chip8.print_status();
+		//std::cin.get();
 	}
-	catch (const std::exception& e)
-	{
-		std::cerr << "Exception: " << e.what() << std::endl;
-		return 1;
-	}
-	test_Chip8Simulator();
-	return 0;
 
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
+	return 0;
 }
 
 // 运行程序: Ctrl + F5 或调试 >“开始执行(不调试)”菜单
