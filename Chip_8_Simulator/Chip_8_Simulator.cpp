@@ -174,15 +174,17 @@ public:
 		else if (first_high == 0x6000) {
 			//Set Vx = kk
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
-			uint8_t kk = opcode_value & 0x00FF;
+			uint8_t kk = (uint8_t)(opcode_value & 0x00FF);
+			std::cout << "Setting V[" << static_cast<int>(x) << "] to " << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(kk) << std::endl;
 			V[x] = kk;
 			PC += 2;
+			std::cout << "V[" << static_cast<int>(x) << "] is now " << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(V[x]) << std::endl;
 			return;
 		}
 		else if (first_high == 0x7000) {
 			//Set Vx = Vx + kk
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
-			uint8_t kk = opcode_value & 0x00FF;
+			uint8_t kk = (uint8_t)(opcode_value & 0x00FF);
 			V[x] += kk;
 			PC += 2;
 			return;
@@ -292,13 +294,21 @@ public:
 		else if (first_high == 0xE000) {
 			uint8_t x = (opcode_value & 0x0F00) >> 8;
 			uint8_t last_byte = opcode_value & 0x00FF;
+			for (size_t i = 0; i < 16; i++)
+			{
+				std::cout << "key[" << std::hex << "]: " << keys[i] << std::endl;
+			}
 			if (last_byte == 0x9E) {
 				//Skip next instruction if key with the value of Vx is pressed
-				PC += 4;
+				if (keys[V[x]]) {
+					PC += 2;
+				}
 			}
 			else if (last_byte == 0xA1) {
 				//Skip next instruction if key with the value of Vx is not pressed
-				PC += 4;
+				if (!keys[V[x]]) {
+					PC += 2;
+				}
 			}
 			else {
 				throw std::runtime_error("Invalid opcode");
@@ -383,6 +393,10 @@ public:
 	}
 	Memory& step() {
 		auto opcode = memory.get_pair(PC);
+		if (opcode.first == 0x13 && opcode.second == 0xdc)
+		{
+			std::cin.get();
+		}
 		std::cout.width(3); std::cout.fill('0');
 		std::cout << "PC: " << std::hex << PC;
 		std::cout << " opcode: " << std::setw(2) << std::setfill('0') << std::hex << std::hex << static_cast<int>(opcode.first);
@@ -391,16 +405,22 @@ public:
 		return memory;
 	}
 	void print_status() const {
-		std::cout << "I: " <<std::setw(3)<<std::setfill('0') << std::hex << I << " ";
+		std::cout << "I: " << std::setw(3) << std::setfill('0') << std::hex << I << " ";
 		std::cout << "SP: " << std::setw(3) << std::setfill('0') << std::hex << SP << " ";
 		std::cout << "PC: " << std::hex << PC << " ";
 		//std::cout << "Delay Timer: " << std::hex << static_cast<int>(delay_timer) << " ";
 		//std::cout << "Sound Timer: " << std::hex << static_cast<int>(sound_timer) << " ";
 		for (size_t i = 0; i < 16; i++)
 		{
-			std::cout << "V["<<std::hex<<i<<"]: "<< std::hex << static_cast<int>(V[i]) << ", ";
+			std::cout << "V[" << std::hex << i << "]: " << std::hex << static_cast<int>(V[i]) << ", ";
 		}
 		std::cout << std::endl << std::endl;
+	}
+	bool is_key_pressed(uint8_t key) {
+		return keys[key];
+	}
+	void set_key(uint8_t key, bool is_pressed) {
+		keys[key] = is_pressed;
 	}
 private:
 	uint8_t V[16]; // 16 8-bit data registers
@@ -413,6 +433,7 @@ private:
 	uint16_t STACK_ADDRESS = 0xEA0;//栈从这里开始，共16个栈
 	uint16_t STACK_SIZE = 16 + 2 + 2 + 1 + 1; //栈的大小，只保存除SP的全部数据寄存器的内容。
 	Memory memory; // Memory
+	std::array<bool, 16> keys = { false }; // 16-key keypad
 };
 
 int test_Chip8Simulator() {
@@ -502,15 +523,76 @@ int main(int argc, char* args[])
 
 
 	bool running = true;
-	SDL_Event e;
+	SDL_Event event;
 	while (running) {
-		while (SDL_PollEvent(&e)) {
-			if (e.type == SDL_QUIT) {
+		while (SDL_PollEvent(&event)) {
+			if (event.type == SDL_QUIT) {
 				running = false;
 			}
+			else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
+				bool isKeyDown = (event.type == SDL_KEYDOWN);
+
+				switch (event.key.keysym.sym) {
+				case SDLK_1: // 对应Chip-8的按键1
+					chip8.set_key(0x1, isKeyDown);
+					break;
+				case SDLK_2: // 对应Chip-8的按键2
+					chip8.set_key(0x2, isKeyDown);
+					break;
+				case SDLK_3: // 对应Chip-8的按键3
+					chip8.set_key(0x3, isKeyDown);
+					break;
+				case SDLK_4: // 对应Chip-8的按键4
+					chip8.set_key(0x4, isKeyDown);
+					break;
+				case SDLK_5: // 对应Chip-8的按键5
+					chip8.set_key(0x5, isKeyDown);
+					break;
+				case SDLK_6: // 对应Chip-8的按键6
+					chip8.set_key(0x6, isKeyDown);
+					break;
+				case SDLK_7: // 对应Chip-8的按键7
+					chip8.set_key(0x7, isKeyDown);
+					break;
+				case SDLK_8: // 对应Chip-8的按键8
+					chip8.set_key(0x8, isKeyDown);
+					break;
+				case SDLK_9: // 对应Chip-8的按键9
+					chip8.set_key(0x9, isKeyDown);
+					break;
+				case SDLK_a: // 对应Chip-8的按键a
+					chip8.set_key(0xa, isKeyDown);
+					break;
+				case SDLK_b: // 对应Chip-8的按键b
+					chip8.set_key(0xb, isKeyDown);
+					break;
+				case SDLK_c: // 对应Chip-8的按键c
+					chip8.set_key(0xc, isKeyDown);
+					break;
+				case SDLK_d: // 对应Chip-8的按键d
+					chip8.set_key(0xd, isKeyDown);
+					break;
+				case SDLK_e: // 对应Chip-8的按键e
+					chip8.set_key(0xe, isKeyDown);
+					break;
+				case SDLK_f: // 对应Chip-8的按键f
+					chip8.set_key(0xf, isKeyDown);
+					break;
+				}
+			}
+
 		}
 		render_screen(renderer, chip8.step());
-		chip8.print_status();
+		//for (size_t i = 0; i < 16; i++)
+		//{
+		//	std::cout << "key[" << std::hex << i << "]: "  <<chip8.is_key_pressed(i)<< " ";
+		//	if ((i + 1) % 4 == 0)
+		//	{
+		//		std::cout << std::endl;
+		//	}
+		//}
+		//chip8.print_status();
+		//SDL_Delay(200);
 	}
 
 	SDL_DestroyRenderer(renderer);
@@ -518,14 +600,3 @@ int main(int argc, char* args[])
 	SDL_Quit();
 	return 0;
 }
-
-// 运行程序: Ctrl + F5 或调试 >“开始执行(不调试)”菜单
-// 调试程序: F5 或调试 >“开始调试”菜单
-
-// 入门使用技巧: 
-//   1. 使用解决方案资源管理器窗口添加/管理文件
-//   2. 使用团队资源管理器窗口连接到源代码管理
-//   3. 使用输出窗口查看生成输出和其他消息
-//   4. 使用错误列表窗口查看错误
-//   5. 转到“项目”>“添加新项”以创建新的代码文件，或转到“项目”>“添加现有项”以将现有代码文件添加到项目
-//   6. 将来，若要再次打开此项目，请转到“文件”>“打开”>“项目”并选择 .sln 文件
