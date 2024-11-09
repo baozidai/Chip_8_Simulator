@@ -110,6 +110,7 @@ public:
 				delay_timer = memory.get_byte(address + 20);
 				sound_timer = memory.get_byte(address + 21);
 				SP--;
+				PC += 2;
 				return;
 			}
 			else if (low_byte == 0x00E0) {
@@ -392,7 +393,7 @@ public:
 	void print_status() const {
 		std::cout << "I: " <<std::setw(3)<<std::setfill('0') << std::hex << I << " ";
 		std::cout << "SP: " << std::setw(3) << std::setfill('0') << std::hex << SP << " ";
-		//std::cout << "PC: " << std::hex << PC << " ";
+		std::cout << "PC: " << std::hex << PC << " ";
 		//std::cout << "Delay Timer: " << std::hex << static_cast<int>(delay_timer) << " ";
 		//std::cout << "Sound Timer: " << std::hex << static_cast<int>(sound_timer) << " ";
 		for (size_t i = 0; i < 16; i++)
