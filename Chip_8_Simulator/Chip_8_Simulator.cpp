@@ -393,10 +393,10 @@ public:
 	}
 	Memory& step() {
 		auto opcode = memory.get_pair(PC);
-		if (opcode.first == 0x13 && opcode.second == 0xdc)
-		{
-			std::cin.get();
-		}
+		//if (opcode.first == 0x13 && opcode.second == 0xdc)
+		//{
+		//	std::cin.get();
+		//}
 		std::cout.width(3); std::cout.fill('0');
 		std::cout << "PC: " << std::hex << PC;
 		std::cout << " opcode: " << std::setw(2) << std::setfill('0') << std::hex << std::hex << static_cast<int>(opcode.first);
