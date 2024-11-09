@@ -510,9 +510,7 @@ int main(int argc, char* args[])
 			}
 		}
 		render_screen(renderer, chip8.step());
-		SDL_Delay(100); // 模拟帧率
 		chip8.print_status();
-		//std::cin.get();
 	}
 
 	SDL_DestroyRenderer(renderer);
